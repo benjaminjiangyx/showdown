@@ -6,12 +6,20 @@ from poke_env.battle.move_category import MoveCategory
 from poke_env.calc.damage_calc_gen9 import calculate_damage
 
 class MyAgent(Player):
-    # Scoring thresholds (configurable)
-    HAZARD_SCORE = 400
-    SETUP_SCORE = 500
-    STATUS_SCORE = 300
-    PROTECT_SCORE = 250
-    DEBUFF_SCORE = 200
+    # OLD FIXED CONSTANTS - NO LONGER USED
+    # These have been replaced with dynamic calculations based on damage context
+    # and turn economy. Kept for reference only.
+    # HAZARD_SCORE = 400
+    # SETUP_SCORE = 500
+    # STATUS_SCORE = 300
+    # PROTECT_SCORE = 250
+    # DEBUFF_SCORE = 200
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Track one-time utility moves per battle
+        self.used_trick = {}  # battle_tag -> bool
+
     def choose_move(self, battle):
         # Always prioritize moves over switching
         if battle.available_moves:
@@ -45,6 +53,76 @@ class MyAgent(Player):
         (more valuable when we have more Pokemon remaining).
         """
         return sum(1 for mon in team.values() if not mon.fainted)
+
+    def estimate_remaining_turns(self, battle):
+        """
+        Estimate how many turns remain in the battle.
+
+        Utility: Used to scale status move value by turn economy. Status moves that
+        provide value over time (Toxic, Stealth Rock, Setup moves) are more valuable
+        in longer battles. This heuristic helps compare immediate damage vs future value.
+
+        Heuristics:
+        - Base estimate on current turn number (early/mid/late game)
+        - Adjust down if teams are severely weakened (fewer Pokemon = shorter battle)
+        - Cap between 3-15 turns to avoid extreme values
+
+        Returns: Estimated remaining turns (int, 3-15)
+        """
+        turn = battle.turn if hasattr(battle, 'turn') else 0
+
+        # Base estimate from turn number
+        if turn <= 5:
+            base_estimate = 12  # Early game: ~12 turns remaining
+        elif turn <= 15:
+            base_estimate = 8   # Mid game: ~8 turns remaining
+        else:
+            base_estimate = 4   # Late game: ~4 turns remaining
+
+        # Adjust based on remaining Pokemon (fewer mons = shorter battle)
+        our_remaining = self.count_remaining_mons(battle.team)
+        opp_remaining = self.count_remaining_mons(battle.opponent_team)
+        min_remaining = min(our_remaining, opp_remaining)
+
+        # If either team has 1-2 Pokemon left, battle will end sooner
+        if min_remaining <= 2:
+            base_estimate = min(base_estimate, 5)
+
+        # Clamp to reasonable range
+        return max(3, min(15, base_estimate))
+
+    def get_best_damage_score(self, battle, category=None):
+        """
+        Get the highest damage score among available moves.
+
+        Utility: Used to anchor status move scores to damage output. Instead of using
+        arbitrary fixed values (200, 300, etc.), status moves are valued relative to
+        the damage we could deal. This creates a unified scoring scale.
+
+        Args:
+            battle: The current battle state
+            category: Optional MoveCategory filter (PHYSICAL or SPECIAL). If provided,
+                     only considers moves of that category. Used for debuffs that only
+                     boost specific attack types (Screech for physical, Fake Tears for special).
+
+        Returns: Float representing the highest damage score available, or fallback value
+                 of 120 if no damage moves or calculation fails
+        """
+        best_score = 0
+
+        for move in battle.available_moves:
+            # Skip if we're filtering by category and move doesn't match
+            if category and move.category != category:
+                continue
+
+            # Only consider damaging moves
+            if move.category in [MoveCategory.PHYSICAL, MoveCategory.SPECIAL]:
+                score = self.evaluate_damage_move(battle, move)
+                best_score = max(best_score, score)
+
+        # Fallback: if no damaging moves or all failed, use reasonable default
+        # This represents "typical" damage output (100-150 range)
+        return best_score if best_score > 0 else 120
 
     def estimate_matchup(self, mon, opponent):
         """
@@ -247,7 +325,7 @@ class MyAgent(Player):
 
         Strategy: Gliscor should set up Stealth Rock early to wear down opponent team.
 
-        Returns: HAZARD_SCORE (400) if conditions met, 0 otherwise
+        Returns: Expected HP damage from hazards over remaining battle (0-400+)
         """
         opponent_remaining = self.count_remaining_mons(battle.opponent_team)
 
@@ -255,9 +333,16 @@ class MyAgent(Player):
         if move.side_condition in battle.opponent_side_conditions:
             return 0
 
-        # High value if opponent has 3+ Pokemon
+        # Only worth it if opponent has 3+ Pokemon
         if opponent_remaining >= 3:
-            return self.HAZARD_SCORE
+            # Estimate 2-3 switches per remaining Pokemon
+            expected_switches = opponent_remaining * 2.5
+
+            # Stealth Rock: ~12.5% on neutral, ~25% on 2x weak, ~6% on resistant
+            # Use conservative average of ~25 HP per switch
+            avg_hazard_damage = 25
+
+            return expected_switches * avg_hazard_damage
 
         return 0
 
@@ -274,23 +359,42 @@ class MyAgent(Player):
         Strategy: Excadrill should use Swords Dance when healthy and winning matchup,
         then sweep with boosted Earthquake/Iron Head.
 
-        Returns: SETUP_SCORE (500) if safe to set up, 0 if risky
+        Returns: Extra damage from boosted attacks minus opportunity cost (0-300+)
         """
         active = battle.active_pokemon
 
         if not self.is_favorable_setup_situation(battle):
             return 0
 
+        # Find best damage move to calculate boost value
+        best_damage = self.get_best_damage_score(battle)
+        remaining_turns = self.estimate_remaining_turns(battle)
+
+        # Estimate attacks before switch/death (typically 2-4)
+        # Conservative: assume 3 attacks, but cap by remaining turns
+        expected_attacks = min(3, remaining_turns // 2)
+
         # Check if we can boost further
         if move.self_boost:
             for stat, boost_amount in move.self_boost.items():
                 current_boost = active.boosts.get(stat, 0)
+
                 if boost_amount > 0 and current_boost < 6:
-                    # Can still boost, good opportunity
-                    return self.SETUP_SCORE
+                    # +2 stat boost (standard for Swords Dance, Nasty Plot, etc.)
+                    # Each +1 boost = ~1.5x multiplier, so +2 = ~2.25x, but be conservative
+                    # Assume ~50% damage increase (1.5x)
+                    boosted_damage = best_damage * 1.5
+                    extra_damage = (boosted_damage - best_damage) * expected_attacks
+
+                    # Subtract opportunity cost: we spend 1 turn setting up instead of attacking
+                    opportunity_cost = best_damage * 0.5
+
+                    return max(0, extra_damage - opportunity_cost)
+
                 elif boost_amount < 0 and current_boost > -6:
-                    # Voluntary stat drop (usually for speed control), situational
-                    return self.SETUP_SCORE // 2
+                    # Voluntary stat drop (V-create, Close Combat, etc.)
+                    # Still worth using but lower value
+                    return best_damage * 0.7
 
         return 0
 
@@ -310,21 +414,37 @@ class MyAgent(Player):
 
         Strategy: Gliscor should use Toxic against bulky Pokemon without status.
 
-        Returns: STATUS_SCORE (300) if valuable, 150 if mediocre accuracy, 0 if bad
+        Returns: Expected HP damage from status over remaining turns (0-200+)
         """
         opponent = battle.opponent_active_pokemon
 
         # Don't use if opponent already has status
-        if opponent and opponent.status:
+        if not opponent or opponent.status:
             return 0
 
-        # High value if move has good accuracy and status is valuable
+        opponent_hp = opponent.max_hp if opponent.max_hp else 100
+        remaining_turns = self.estimate_remaining_turns(battle)
+
+        # Toxic: 1/16, 2/16, 3/16... (increasing damage)
+        # Burn: 1/16 per turn + halves physical attack
+        # Paralysis: 25% immobilize + speed drop (harder to quantify)
+        # Sleep: 1-3 turns of lost actions
+        # Average these effects to ~4% HP per turn
+
         if move.accuracy >= 0.85:
-            return self.STATUS_SCORE
+            # Cap at 8 turns to avoid overvaluing
+            turns_active = min(remaining_turns, 8)
+            hp_damage = opponent_hp * 0.04 * turns_active
+
+            # Factor in accuracy
+            return hp_damage * move.accuracy
 
         # Medium value for less accurate moves
-        if move.accuracy >= 0.7:
-            return self.STATUS_SCORE // 2
+        elif move.accuracy >= 0.7:
+            turns_active = min(remaining_turns, 6)
+            hp_damage = opponent_hp * 0.03 * turns_active
+
+            return hp_damage * move.accuracy
 
         return 0
 
@@ -344,8 +464,7 @@ class MyAgent(Player):
         Strategy: Gliscor with Poison Heal should use Protect strategically to heal
         while forcing opponent to make moves.
 
-        Returns: PROTECT_SCORE (250) if Poison Heal & fresh, 125 if used once,
-                 0 if used twice (will likely fail)
+        Returns: HP value of healing or damage avoided (0-150+)
         """
         active = battle.active_pokemon
 
@@ -354,16 +473,21 @@ class MyAgent(Player):
         if protect_counter >= 2:
             return 0  # Very likely to fail
 
-        # High value for Poison Heal (Gliscor)
+        # High value for Poison Heal (Gliscor) - direct HP healing
         if active.ability and "poison heal" in active.ability.lower():
-            if protect_counter == 0:
-                return self.PROTECT_SCORE
-            else:
-                return self.PROTECT_SCORE // 2
+            heal_value = (active.max_hp if active.max_hp else 100) * 0.125  # 12.5% HP
 
-        # Medium value for scouting
+            if protect_counter == 0:
+                return heal_value  # Full healing value
+            else:
+                return heal_value * 0.5  # 50% chance to fail
+
+        # Scouting value = avoiding potential damage
         if protect_counter == 0:
-            return self.PROTECT_SCORE // 2
+            # Estimate opponent's best damage output
+            # Use our best damage as proxy (similar power level)
+            best_damage = self.get_best_damage_score(battle)
+            return best_damage * 0.4  # Avoid ~40% of expected damage
 
         return 0
 
@@ -378,25 +502,62 @@ class MyAgent(Player):
         - Sticky Web: -1 Speed on switch-in (slows down fast threats)
 
         Conditions for use:
-        - Opponent's stat isn't already heavily debuffed (no point at -6)
+        - Opponent's stat isn't already debuffed (diminishing returns after first use)
+        - For offensive debuffs (Screech/Fake Tears), must have corresponding move type
         - Setting up for a big attack (Screech then physical move)
 
         Strategy: Swampert can use Screech to soften up bulky Pokemon before
         hitting them with Earthquake.
 
-        Returns: DEBUFF_SCORE (200) if valuable, 0 if already debuffed
+        Returns: Extra damage from debuff over expected attacks (0-150+)
         """
         opponent = battle.opponent_active_pokemon
 
         if not opponent or not move.boosts:
             return 0
 
-        # Check if opponent stat isn't already heavily debuffed
+        remaining_turns = self.estimate_remaining_turns(battle)
+        # Conservative estimate: 2 attacks before opponent switches or faints
+        expected_attacks = min(2, remaining_turns // 3)
+
+        # Check if opponent stat isn't already debuffed (diminishing returns)
         for stat, debuff_amount in move.boosts.items():
             if debuff_amount < 0:  # It's a debuff
                 current_boost = opponent.boosts.get(stat, 0)
-                if current_boost > -4:  # Not heavily debuffed yet
-                    return self.DEBUFF_SCORE
+
+                # Already at cap, useless
+                if current_boost <= -6:
+                    return 0
+
+                # Context-aware: only use offensive debuffs if we have matching attack type
+                if stat == 'def':  # Defense debuff (Screech) - need physical moves
+                    best_damage = self.get_best_damage_score(battle, MoveCategory.PHYSICAL)
+                    if best_damage == 0:
+                        return 0  # No physical moves to follow up, useless
+
+                elif stat == 'spd':  # Sp. Def debuff (Fake Tears) - need special moves
+                    best_damage = self.get_best_damage_score(battle, MoveCategory.SPECIAL)
+                    if best_damage == 0:
+                        return 0  # No special moves to follow up, useless
+                else:
+                    # Other debuffs (Speed, Accuracy, Evasion)
+                    best_damage = self.get_best_damage_score(battle)
+
+                # -2 debuff = ~50% damage increase (Defense/SpDef drops)
+                extra_damage_per_hit = best_damage * 0.5
+                total_value = extra_damage_per_hit * expected_attacks
+
+                # First use: full value
+                if current_boost == 0:
+                    return total_value
+
+                # Second use: much lower value (diminishing returns)
+                # Only worth it if we don't have better options
+                if current_boost >= -2:
+                    return total_value * 0.25
+
+                # Third+ use: minimal value
+                return total_value * 0.05
 
         return 0
 
@@ -423,14 +584,35 @@ class MyAgent(Player):
         # Move-specific logic
         move_id = move.id if hasattr(move, 'id') else str(move).lower()
 
-        # Trick (cripple with Choice item)
+        # Trick (cripple with Choice item) - only effective once per battle
         if "trick" in move_id:
-            return self.STATUS_SCORE
+            battle_tag = battle.battle_tag
+            if self.used_trick.get(battle_tag, False):
+                return 0  # Already used, swapping back is useless
+
+            # Mark as used
+            self.used_trick[battle_tag] = True
+
+            # Trick value = crippling opponent for remaining turns
+            remaining_turns = self.estimate_remaining_turns(battle)
+            best_damage = self.get_best_damage_score(battle)
+
+            # Locking opponent into one move = significant value over remaining turns
+            # More valuable in longer battles
+            if remaining_turns > 5:
+                return best_damage * 1.5  # 150% of a damage move
+            else:
+                return best_damage * 0.8  # 80% of a damage move in short battles
 
         # Rapid Spin (hazard removal)
         if "rapidspin" in move_id or "defog" in move_id:
             if battle.side_conditions and self.count_remaining_mons(battle.team) >= 2:
-                return self.DEBUFF_SCORE
+                # Value based on preventing future hazard damage
+                our_remaining = self.count_remaining_mons(battle.team)
+                # Estimate 1-2 switches per remaining Pokemon
+                expected_switches = our_remaining * 1.5
+                # Each switch would take ~25 HP damage from hazards
+                return expected_switches * 25
             return 0
 
         # U-turn/Volt Switch (pivoting moves) - use damage calc
