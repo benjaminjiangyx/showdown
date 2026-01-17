@@ -447,6 +447,16 @@ async def main():
     # Custom team in Pokemon Showdown's "packed" format
     # Format: Pokemon | Ability | Item | Move1, Move2, Move3, Move4 | Nature | EVs | IVs | Level | Shiny
     custom_team = """
+Gliscor @ Toxic Orb  
+Ability: Poison Heal  
+Tera Type: Water  
+EVs: 252 HP / 184 Def / 72 Spe  
+Impish Nature  
+- Earthquake  
+- Toxic  
+- Protect  
+- Stealth Rock 
+
 Tyranitar (F) @ Choice Band  
 Ability: Sand Stream  
 Tera Type: Ghost  
@@ -486,17 +496,7 @@ IVs: 0 Atk
 - Draco Meteor  
 - Flash Cannon  
 - Fire Blast  
-- Thunderbolt  
-
-Gliscor @ Toxic Orb  
-Ability: Poison Heal  
-Tera Type: Water  
-EVs: 252 HP / 184 Def / 72 Spe  
-Impish Nature  
-- Earthquake  
-- Toxic  
-- Protect  
-- Stealth Rock  
+- Thunderbolt   
 
 Chandelure @ Choice Specs  
 Ability: Flame Body  
