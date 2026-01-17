@@ -255,6 +255,24 @@ class MyAgent(Player):
             # Fallback to base power if calculation fails
             return move.base_power if move.base_power else 0
         return 0
+    
+    def max_dmg_move(self, battle):
+        """
+        Identify the move with the highest potential damage.
+
+        """
+        best_move = None
+        highest_damage = -1
+
+        for move in battle.available_moves:
+            if move.category != MoveCategory.STATUS:
+                damage = self.evaluate_damage_move(battle, move)
+                if damage > highest_damage:
+                    highest_damage = damage
+                    best_move = move
+
+        return best_move
+
 
     def calculate_move_score(self, battle, move):
         """
@@ -269,9 +287,10 @@ class MyAgent(Player):
         """
         if move.category == MoveCategory.STATUS:
             return self.evaluate_status_move(battle, move)
-        else:
+        elif move == self.max_dmg_move(battle):
             return self.evaluate_damage_move(battle, move)
-
+        else:
+            return 0  # Non-max damage moves get no score
     def evaluate_status_move(self, battle, move):
         """
         Evaluate status moves based on battle context.
@@ -504,6 +523,8 @@ class MyAgent(Player):
         Conditions for use:
         - Opponent's stat isn't already debuffed (diminishing returns after first use)
         - For offensive debuffs (Screech/Fake Tears), must have corresponding move type
+        - Opponent's stat isn't already debuffed (diminishing returns after first use)
+        - For offensive debuffs (Screech/Fake Tears), must have corresponding move type
         - Setting up for a big attack (Screech then physical move)
 
         Strategy: Swampert can use Screech to soften up bulky Pokemon before
@@ -512,8 +533,9 @@ class MyAgent(Player):
         Returns: Extra damage from debuff over expected attacks (0-150+)
         """
         opponent = battle.opponent_active_pokemon
+        active = battle.active_pokemon
 
-        if not opponent or not move.boosts:
+        if not opponent or not move.boosts or not active:
             return 0
 
         remaining_turns = self.estimate_remaining_turns(battle)
@@ -584,6 +606,7 @@ class MyAgent(Player):
         # Move-specific logic
         move_id = move.id if hasattr(move, 'id') else str(move).lower()
 
+        # Trick (cripple with Choice item) - only effective once per battle
         # Trick (cripple with Choice item) - only effective once per battle
         if "trick" in move_id:
             battle_tag = battle.battle_tag
