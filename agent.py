@@ -92,7 +92,7 @@ IVs: 0 Atk
 
     # Bot will wait for challenges from human players
     # Generate unique username to avoid conflicts
-    username = f"MyBot{random.randint(100, 999)}"
+    username = "acrossthehillscame9men"
     account = AccountConfiguration(username, None)
     agent = MyAgent(
         account_configuration=account,
