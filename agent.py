@@ -80,7 +80,7 @@ Impish Nature
 
 Chandelure @ Choice Specs  
 Ability: Flame Body  
-Tera Type: Ghost  
+Tera Type: Grass  
 EVs: 252 SpA / 4 SpD / 252 Spe  
 Timid Nature  
 IVs: 0 Atk  
