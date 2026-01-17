@@ -27,32 +27,67 @@ async def main():
     # Custom team in Pokemon Showdown's "packed" format
     # Format: Pokemon | Ability | Item | Move1, Move2, Move3, Move4 | Nature | EVs | IVs | Level | Shiny
     custom_team = """
-Pikachu @ Light Ball
-Ability: Static
-EVs: 252 SpA / 4 SpD / 252 Spe
-Timid Nature
-- Thunderbolt
-- Grass Knot
-- Volt Switch
-- Thunder Wave
+Tyranitar (F) @ Choice Band  
+Ability: Sand Stream  
+Tera Type: Ghost  
+EVs: 4 HP / 252 Atk / 252 Spe  
+Adamant Nature  
+- Knock Off  
+- Stone Edge  
+- Ice Punch  
+- Low Kick  
 
-Charizard @ Heavy-Duty Boots
-Ability: Blaze
-EVs: 252 SpA / 4 SpD / 252 Spe
-Timid Nature
-- Flamethrower
-- Air Slash
-- Roost
-- Focus Blast
+Excadrill (F) @ Air Balloon  
+Ability: Sand Rush  
+Tera Type: Dragon  
+EVs: 4 HP / 252 Atk / 252 Spe  
+Adamant Nature  
+- Swords Dance  
+- Earthquake  
+- Iron Head  
+- Rapid Spin  
 
-Gyarados @ Leftovers
-Ability: Intimidate
-EVs: 252 Atk / 4 SpD / 252 Spe
-Jolly Nature
-- Waterfall
-- Earthquake
-- Ice Fang
-- Dragon Dance
+Swampert @ Rocky Helmet  
+Ability: Torrent  
+Tera Type: Water  
+EVs: 252 HP / 4 Def / 252 SpD  
+Sassy Nature  
+- Earthquake  
+- Flip Turn  
+- Knock Off  
+- Screech  
+
+Goodra-Hisui @ Choice Specs  
+Ability: Gooey  
+Tera Type: Fairy  
+EVs: 252 HP / 252 SpA / 4 SpD  
+Quiet Nature  
+IVs: 0 Atk  
+- Draco Meteor  
+- Flash Cannon  
+- Fire Blast  
+- Thunderbolt  
+
+Gliscor @ Toxic Orb  
+Ability: Poison Heal  
+Tera Type: Water  
+EVs: 252 HP / 184 Def / 72 Spe  
+Impish Nature  
+- Earthquake  
+- Toxic  
+- Protect  
+- Stealth Rock  
+
+Chandelure @ Choice Specs  
+Ability: Flame Body  
+Tera Type: Ghost  
+EVs: 252 SpA / 4 SpD / 252 Spe  
+Timid Nature  
+IVs: 0 Atk  
+- Flamethrower  
+- Shadow Ball  
+- Energy Ball  
+- Trick  
 """
 
     # For development it's easiest to run against a local server config
