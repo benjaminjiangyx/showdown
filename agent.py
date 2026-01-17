@@ -24,6 +24,9 @@ class MyAgent(Player):
         return self.choose_random_move(battle)
 
 async def main():
+    import logging
+    logging.basicConfig(level=logging.INFO)
+
     # Custom team in Pokemon Showdown's "packed" format
     # Format: Pokemon | Ability | Item | Move1, Move2, Move3, Move4 | Nature | EVs | IVs | Level | Shiny
     custom_team = """
@@ -92,7 +95,7 @@ IVs: 0 Atk
 
     # Bot will wait for challenges from human players
     # Generate unique username to avoid conflicts
-    username = f"MyBot{random.randint(100, 999)}"
+    username = "MyBot999"
     account = AccountConfiguration(username, None)
     agent = MyAgent(
         account_configuration=account,
