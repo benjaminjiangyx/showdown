@@ -1,7 +1,7 @@
 import asyncio
+import random
 from poke_env.player import Player
-from poke_env.player import RandomPlayer
-from poke_env.server_configuration import LocalhostServerConfiguration
+from poke_env import AccountConfiguration
 
 class MyAgent(Player):
     def choose_move(self, battle):
@@ -90,15 +90,30 @@ IVs: 0 Atk
 - Trick  
 """
 
-    # For development it's easiest to run against a local server config
-    server_config = LocalhostServerConfiguration
-    # Change to gen9ou (OverUsed tier) which allows custom teams
-    agent = MyAgent(battle_format="gen9ou", team=custom_team, server_configuration=server_config, max_concurrent_battles=1)
-    opponent = RandomPlayer(battle_format="gen9ou", server_configuration=server_config)
+    # Bot will wait for challenges from human players
+    # Generate unique username to avoid conflicts
+    username = f"MyBot{random.randint(100, 999)}"
+    account = AccountConfiguration(username, None)
+    agent = MyAgent(
+        account_configuration=account,
+        battle_format="gen9ou",
+        team=custom_team,
+        max_concurrent_battles=10
+    )
 
-    # Start one async battle between them
-    await agent.battle_against(opponent, n_battles=1)
-    print(f"MyAgent won {agent.n_won_battles}/{agent.n_finished_battles}")
+    print(f"Bot is running and accepting battles!")
+    print(f"Bot username: {agent.username}")
+    print(f"Go to http://localhost:8000")
+    print(f"Challenge '{agent.username}' to a gen9ou battle")
+    print("Press Ctrl+C to stop the bot\n")
+
+    # Keep bot running indefinitely, accepting challenges
+    while True:
+        try:
+            await agent.accept_challenges(None, n_challenges=1)
+        except Exception as e:
+            print(f"Error: {e}")
+            await asyncio.sleep(1)
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(main())
