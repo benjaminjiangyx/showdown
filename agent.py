@@ -169,13 +169,38 @@ class MyAgent(Player):
 
         Returns: Average expected damage (used as score to compare with status moves)
         """
-        damage_range = calculate_damage(
-        attacker=battle.active_pokemon,
-        defender=battle.opponent_active_pokemon,
-        move=move,
-        battle=battle
-        )
-        return sum(damage_range) / len(damage_range)
+        try:
+            damage_range = calculate_damage(
+                attacker=battle.active_pokemon,
+                defender=battle.opponent_active_pokemon,
+                move=move,
+                battle=battle
+            )
+            if damage_range:
+                # Return average damage as score
+                return sum(damage_range) / len(damage_range)
+        except:
+            # Fallback to base power if calculation fails
+            return move.base_power if move.base_power else 0
+        return 0
+    
+    def max_dmg_move(self, battle):
+        """
+        Identify the move with the highest potential damage.
+
+        """
+        best_move = None
+        highest_damage = -1
+
+        for move in battle.available_moves:
+            if move.category != MoveCategory.STATUS:
+                damage = self.evaluate_damage_move(battle, move)
+                if damage > highest_damage:
+                    highest_damage = damage
+                    best_move = move
+
+        return best_move
+
 
     def calculate_move_score(self, battle, move):
         """
@@ -190,9 +215,10 @@ class MyAgent(Player):
         """
         if move.category == MoveCategory.STATUS:
             return self.evaluate_status_move(battle, move)
-        else:
+        elif move == self.max_dmg_move(battle):
             return self.evaluate_damage_move(battle, move)
-
+        else:
+            return 0  # Non-max damage moves get no score
     def evaluate_status_move(self, battle, move):
         """
         Evaluate status moves based on battle context.
