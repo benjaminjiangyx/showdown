@@ -33,13 +33,33 @@ class MyAgent(Player):
         # Fallback: random valid order
         return self.choose_random_move(battle)
 
-    # Helper methods for battle state analysis
+    # ==================== Helper Methods for Battle State Analysis ====================
+    # These methods help evaluate the current battle situation to make strategic decisions
+
     def count_remaining_mons(self, team):
-        """Count non-fainted Pokemon in team"""
+        """
+        Count non-fainted Pokemon in a team.
+
+        Utility: Used to decide whether to set up entry hazards (more valuable when
+        opponent has more Pokemon remaining) and whether hazard removal is worthwhile
+        (more valuable when we have more Pokemon remaining).
+        """
         return sum(1 for mon in team.values() if not mon.fainted)
 
     def estimate_matchup(self, mon, opponent):
-        """Estimate matchup advantage based on type effectiveness and speed"""
+        """
+        Estimate matchup advantage based on type effectiveness, speed, and HP.
+
+        Utility: Determines if we're winning the 1v1 matchup to decide whether it's
+        safe to use setup moves. Positive score = favorable matchup (safe to boost),
+        negative score = unfavorable matchup (should attack or switch).
+
+        Scoring factors:
+        - Offensive type advantage: Can we hit them super effectively?
+        - Defensive type advantage: Are we resistant to their attacks?
+        - Speed advantage: Do we move first?
+        - HP advantage: Are we healthier than them?
+        """
         if not mon or not opponent:
             return 0
 
@@ -72,7 +92,15 @@ class MyAgent(Player):
         return score
 
     def can_ohko(self, attacker, defender, move):
-        """Check if move can potentially OHKO the defender"""
+        """
+        Check if a move can potentially one-hit KO the defender.
+
+        Utility: Used to identify guaranteed knockout opportunities. Could be used
+        to prioritize finishing off weakened opponents or to assess risk when
+        deciding whether to set up (don't set up if opponent can OHKO us).
+
+        Returns: True if max damage >= defender's HP, False otherwise
+        """
         try:
             damage_range = calculate_damage(
                 attacker=attacker,
@@ -89,7 +117,16 @@ class MyAgent(Player):
         return False
 
     def is_favorable_setup_situation(self, battle):
-        """Check if it's a good situation to use setup moves"""
+        """
+        Check if it's a good situation to use setup moves (Swords Dance, etc.).
+
+        Utility: Prevents the bot from setting up in bad situations where it will
+        just take heavy damage or get KO'd. Setup moves are only valuable when:
+        1. We're at high HP (>80%) - can survive hits while boosting
+        2. We have a favorable matchup - won't get destroyed before we can sweep
+
+        Returns: True if safe to set up, False if risky
+        """
         active = battle.active_pokemon
         opponent = battle.opponent_active_pokemon
 
@@ -106,9 +143,26 @@ class MyAgent(Player):
 
         return True
 
-    # Move evaluation methods
+    # ==================== Move Evaluation Methods ====================
+    # These methods score moves to determine which is best to use
+
     def evaluate_damage_move(self, battle, move):
-        """Evaluate offensive moves using damage calculator"""
+        """
+        Evaluate offensive moves using comprehensive damage calculation.
+
+        Utility: Replaces the old "highest base power" approach with actual damage
+        calculation. Now considers ALL damage modifiers including:
+        - STAB (Same Type Attack Bonus): 1.5x if move type matches Pokemon type
+        - Type effectiveness: 0x to 4x multiplier based on type chart
+        - Attack/Defense stats and stat boosts
+        - Weather effects (Fire stronger in sun, Water stronger in rain)
+        - Items (Choice Band/Specs, Life Orb, etc.)
+        - Abilities (Huge Power, Technician, type boosters, etc.)
+        - Status conditions (Burn halves physical damage)
+        - Screens (Reflect/Light Screen)
+
+        Returns: Average expected damage (used as score to compare with status moves)
+        """
         try:
             damage_range = calculate_damage(
                 attacker=battle.active_pokemon,
@@ -125,14 +179,36 @@ class MyAgent(Player):
         return 0
 
     def calculate_move_score(self, battle, move):
-        """Main scoring dispatcher for all moves"""
+        """
+        Main scoring dispatcher for all moves.
+
+        Utility: Routes each move to the appropriate evaluation function based on
+        whether it's an offensive move (Physical/Special) or status move. This
+        creates a unified scoring system where all moves (damaging and non-damaging)
+        are scored on the same scale, allowing direct comparison.
+
+        Returns: Numeric score (higher = better)
+        """
         if move.category == MoveCategory.STATUS:
             return self.evaluate_status_move(battle, move)
         else:
             return self.evaluate_damage_move(battle, move)
 
     def evaluate_status_move(self, battle, move):
-        """Evaluate status moves based on battle context"""
+        """
+        Evaluate status moves based on battle context.
+
+        Utility: Determines when status moves are more valuable than attacking.
+        Routes to specialized evaluators for different status move categories:
+        - Entry hazards (Stealth Rock, Spikes)
+        - Setup moves (Swords Dance, Nasty Plot)
+        - Status infliction (Toxic, Will-O-Wisp, Thunder Wave)
+        - Protection (Protect, Detect)
+        - Debuffs (Screech, Intimidate)
+        - Utility (Trick, Rapid Spin, U-turn/Volt Switch)
+
+        Returns: Context-based score (0-500+)
+        """
         # Entry Hazards (Stealth Rock, Spikes, etc.)
         if move.side_condition:
             return self.evaluate_hazard(battle, move)
@@ -157,8 +233,22 @@ class MyAgent(Player):
         else:
             return self.evaluate_utility(battle, move)
 
+    # ==================== Status Move Evaluators ====================
+    # Each function evaluates a specific category of status move
+
     def evaluate_hazard(self, battle, move):
-        """Evaluate entry hazard moves (Stealth Rock, Spikes, etc.)"""
+        """
+        Evaluate entry hazard moves (Stealth Rock, Spikes, Toxic Spikes).
+
+        Utility: Entry hazards damage opponent Pokemon when they switch in, providing
+        passive chip damage throughout the battle. Most valuable when:
+        - Opponent has 3+ Pokemon remaining (more switch-ins = more damage)
+        - Hazards aren't already set up (no point in redundant setup)
+
+        Strategy: Gliscor should set up Stealth Rock early to wear down opponent team.
+
+        Returns: HAZARD_SCORE (400) if conditions met, 0 otherwise
+        """
         opponent_remaining = self.count_remaining_mons(battle.opponent_team)
 
         # Check if hazard already active
@@ -172,7 +262,20 @@ class MyAgent(Player):
         return 0
 
     def evaluate_setup_move(self, battle, move):
-        """Evaluate setup moves (Swords Dance, Nasty Plot, etc.)"""
+        """
+        Evaluate setup moves (Swords Dance, Nasty Plot, Dragon Dance, etc.).
+
+        Utility: Setup moves boost our stats to enable sweeps. Taking a turn to boost
+        is only worth it when we can survive and then sweep. Conditions required:
+        - Favorable matchup (winning type advantage, high HP > 80%)
+        - Can boost further (not already at +6 in that stat)
+        - Safe situation (won't get OHKO'd while setting up)
+
+        Strategy: Excadrill should use Swords Dance when healthy and winning matchup,
+        then sweep with boosted Earthquake/Iron Head.
+
+        Returns: SETUP_SCORE (500) if safe to set up, 0 if risky
+        """
         active = battle.active_pokemon
 
         if not self.is_favorable_setup_situation(battle):
@@ -192,7 +295,23 @@ class MyAgent(Player):
         return 0
 
     def evaluate_status_infliction(self, battle, move):
-        """Evaluate status-inflicting moves (Toxic, Will-O-Wisp, etc.)"""
+        """
+        Evaluate status-inflicting moves (Toxic, Will-O-Wisp, Thunder Wave).
+
+        Utility: Status conditions cripple opponent Pokemon:
+        - Toxic: Increasing damage each turn (great vs bulky Pokemon)
+        - Burn: Halves physical attack + residual damage (cripples physical attackers)
+        - Paralysis: 25% chance to not move + speed reduction (cripples fast sweepers)
+        - Sleep: Can't move for 1-3 turns (effectively removes from battle temporarily)
+
+        Conditions for use:
+        - Opponent has no status (Pokemon can only have one major status)
+        - Move has decent accuracy (>70%)
+
+        Strategy: Gliscor should use Toxic against bulky Pokemon without status.
+
+        Returns: STATUS_SCORE (300) if valuable, 150 if mediocre accuracy, 0 if bad
+        """
         opponent = battle.opponent_active_pokemon
 
         # Don't use if opponent already has status
@@ -210,7 +329,24 @@ class MyAgent(Player):
         return 0
 
     def evaluate_protect(self, battle, move):
-        """Evaluate Protect and similar moves"""
+        """
+        Evaluate Protect and similar moves (Detect, King's Shield, etc.).
+
+        Utility: Protect blocks the opponent's move for one turn. Uses:
+        - Stalling for Poison Heal (Gliscor heals 1/8 HP each turn with Toxic Orb)
+        - Scouting opponent's move choice
+        - Stalling for weather/terrain damage
+        - Burning a turn of opponent's setup
+
+        Diminishing returns: Protect's success rate drops with consecutive uses
+        (100% -> 50% -> 25%, tracked by protect_counter)
+
+        Strategy: Gliscor with Poison Heal should use Protect strategically to heal
+        while forcing opponent to make moves.
+
+        Returns: PROTECT_SCORE (250) if Poison Heal & fresh, 125 if used once,
+                 0 if used twice (will likely fail)
+        """
         active = battle.active_pokemon
 
         # Check protect counter (diminishing returns)
@@ -232,7 +368,24 @@ class MyAgent(Player):
         return 0
 
     def evaluate_debuff(self, battle, move):
-        """Evaluate opponent debuff moves (Screech, etc.)"""
+        """
+        Evaluate opponent debuff moves (Screech, Charm, Growl, etc.).
+
+        Utility: Debuff moves lower opponent's stats, making them easier to handle:
+        - Screech: -2 Defense (makes physical attacks deal massive damage)
+        - Charm/Growl: -2 Attack (weakens physical attackers)
+        - Fake Tears: -2 Sp. Def (boosts special attack damage)
+        - Sticky Web: -1 Speed on switch-in (slows down fast threats)
+
+        Conditions for use:
+        - Opponent's stat isn't already heavily debuffed (no point at -6)
+        - Setting up for a big attack (Screech then physical move)
+
+        Strategy: Swampert can use Screech to soften up bulky Pokemon before
+        hitting them with Earthquake.
+
+        Returns: DEBUFF_SCORE (200) if valuable, 0 if already debuffed
+        """
         opponent = battle.opponent_active_pokemon
 
         if not opponent or not move.boosts:
@@ -248,7 +401,25 @@ class MyAgent(Player):
         return 0
 
     def evaluate_utility(self, battle, move):
-        """Evaluate utility moves (Trick, Rapid Spin, U-turn, etc.)"""
+        """
+        Evaluate utility moves (Trick, Rapid Spin, U-turn, Volt Switch, etc.).
+
+        Utility: Catch-all for special-purpose moves that don't fit other categories:
+
+        - Trick: Swap held items (cripple opponent by giving them Choice item)
+        - Rapid Spin / Defog: Remove entry hazards from our side
+        - U-turn / Volt Switch / Flip Turn: Deal damage AND switch out (momentum)
+        - Healing moves: Recover HP
+        - Weather setters: Set up sun/rain/sand/hail
+
+        Strategy examples:
+        - Chandelure: Use Trick to lock opponent into one move with Choice Specs
+        - Excadrill: Use Rapid Spin to clear hazards while dealing damage
+        - Swampert: Use Flip Turn to pivot and maintain momentum
+
+        Returns: Varies by move (STATUS_SCORE for Trick, DEBUFF_SCORE for hazard
+                 removal, damage score for pivoting moves, 50 as default)
+        """
         # Move-specific logic
         move_id = move.id if hasattr(move, 'id') else str(move).lower()
 
