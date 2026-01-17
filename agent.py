@@ -9,9 +9,15 @@ class MyAgent(Player):
     # Scoring thresholds (configurable)
     HAZARD_SCORE = 400
     SETUP_SCORE = 500
-    STATUS_SCORE = 300
+    STATUS_SCORE = 150  # Lowered from 300 - status moves compete with damage
     PROTECT_SCORE = 250
-    DEBUFF_SCORE = 200
+    DEBUFF_SCORE = 120  # Lowered from 200 - only worth first use, then diminishes
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Track one-time utility moves per battle
+        self.used_trick = {}  # battle_tag -> bool
+
     def choose_move(self, battle):
         # Always prioritize moves over switching
         if battle.available_moves:
@@ -378,25 +384,63 @@ class MyAgent(Player):
         - Sticky Web: -1 Speed on switch-in (slows down fast threats)
 
         Conditions for use:
-        - Opponent's stat isn't already heavily debuffed (no point at -6)
+        - Opponent's stat isn't already debuffed (diminishing returns after first use)
+        - For offensive debuffs (Screech/Fake Tears), must have corresponding move type
         - Setting up for a big attack (Screech then physical move)
 
         Strategy: Swampert can use Screech to soften up bulky Pokemon before
         hitting them with Earthquake.
 
-        Returns: DEBUFF_SCORE (200) if valuable, 0 if already debuffed
+        Returns: DEBUFF_SCORE on first use (if have matching moves), much lower on
+                 subsequent uses, 0 if maxed or no matching moves
         """
         opponent = battle.opponent_active_pokemon
+        active = battle.active_pokemon
 
-        if not opponent or not move.boosts:
+        if not opponent or not move.boosts or not active:
             return 0
 
-        # Check if opponent stat isn't already heavily debuffed
+        # Check if opponent stat isn't already debuffed (diminishing returns)
         for stat, debuff_amount in move.boosts.items():
             if debuff_amount < 0:  # It's a debuff
                 current_boost = opponent.boosts.get(stat, 0)
-                if current_boost > -4:  # Not heavily debuffed yet
-                    return self.DEBUFF_SCORE
+
+                # Already at cap, useless
+                if current_boost <= -6:
+                    return 0
+
+                base_score = self.DEBUFF_SCORE
+
+                # Context-aware: only use offensive debuffs if we have matching attack type
+                if stat == 'def':  # Defense debuff (Screech) - need physical moves
+                    has_physical = any(
+                        m.category == MoveCategory.PHYSICAL
+                        for m in battle.available_moves
+                        if m != move
+                    )
+                    if not has_physical:
+                        return 0  # No physical moves to follow up, useless
+
+                elif stat == 'spd':  # Sp. Def debuff (Fake Tears) - need special moves
+                    has_special = any(
+                        m.category == MoveCategory.SPECIAL
+                        for m in battle.available_moves
+                        if m != move
+                    )
+                    if not has_special:
+                        return 0  # No special moves to follow up, useless
+
+                # First use: full value
+                if current_boost == 0:
+                    return base_score
+
+                # Second use: much lower value (diminishing returns)
+                # Only worth it if we don't have better options
+                if current_boost >= -2:
+                    return base_score // 4  # 30 points
+
+                # Third+ use: minimal value
+                return base_score // 10  # 12 points
 
         return 0
 
@@ -423,8 +467,13 @@ class MyAgent(Player):
         # Move-specific logic
         move_id = move.id if hasattr(move, 'id') else str(move).lower()
 
-        # Trick (cripple with Choice item)
+        # Trick (cripple with Choice item) - only effective once per battle
         if "trick" in move_id:
+            battle_tag = battle.battle_tag
+            if self.used_trick.get(battle_tag, False):
+                return 0  # Already used, swapping back is useless
+            # Mark as used and return high score
+            self.used_trick[battle_tag] = True
             return self.STATUS_SCORE
 
         # Rapid Spin (hazard removal)
