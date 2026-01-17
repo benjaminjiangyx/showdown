@@ -169,20 +169,13 @@ class MyAgent(Player):
 
         Returns: Average expected damage (used as score to compare with status moves)
         """
-        try:
-            damage_range = calculate_damage(
-                attacker=battle.active_pokemon,
-                defender=battle.opponent_active_pokemon,
-                move=move,
-                battle=battle
-            )
-            if damage_range:
-                # Return average damage as score
-                return sum(damage_range) / len(damage_range)
-        except:
-            # Fallback to base power if calculation fails
-            return move.base_power if move.base_power else 0
-        return 0
+        damage_range = calculate_damage(
+        attacker=battle.active_pokemon,
+        defender=battle.opponent_active_pokemon,
+        move=move,
+        battle=battle
+        )
+        return sum(damage_range) / len(damage_range)
 
     def calculate_move_score(self, battle, move):
         """
